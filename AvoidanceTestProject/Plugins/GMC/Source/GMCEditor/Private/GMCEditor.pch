@@ -1,0 +1,4 @@
+// Copyright 2022-2024 Dominik Lips. All Rights Reserved.
+#pragma once
+
+#include "CoreMinimal.h"

@@ -1,0 +1,10 @@
+// Copyright 2022-2024 Dominik Lips. All Rights Reserved.
+#pragma once
+
+#include "CoreMinimal.h"
+
+GMCCORE_API DECLARE_LOG_CATEGORY_EXTERN(LogGMCPawn, Log, All);
+GMCCORE_API DECLARE_LOG_CATEGORY_EXTERN(LogGMCController, Log, All);
+GMCCORE_API DECLARE_LOG_CATEGORY_EXTERN(LogGMCReplication, Log, All);
+GMCCORE_API DECLARE_LOG_CATEGORY_EXTERN(LogGMCMovement, Log, All);
+GMCCORE_API DECLARE_LOG_CATEGORY_EXTERN(LogGMCRollbackActor, Log, All);

@@ -1,0 +1,40 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "Animation Matching Suite 1.1",
+	"FriendlyName": "Animation Matching Suite",
+	"Description": "A suite of animation-related tools geared toward matching playback to features like pose and distance.",
+	"Category": "Animation Code Plugins",
+	"CreatedBy": "MuuKnighted Games",
+	"CreatedByURL": "",
+	"DocsURL": "https://drive.google.com/file/d/1yqJT3Q4wOsGufGjyYvs50Sci27UwiV4X/view?usp=sharing",
+	"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/e820977cf76443e4a298912e3d80ca19",
+	"SupportURL": "https://discord.gg/HWmKtWB6UY",
+	"EngineVersion": "5.4.0",
+	"CanContainContent": false,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "AnimationMatchingSuite",
+			"Type": "Runtime",
+			"LoadingPhase": "PreDefault",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"AnimGraphRuntime"
+			]
+		},
+		{
+			"Name": "AnimationMatchingSuiteEditor",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "PreDefault",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"AdditionalDependencies": [
+				"AnimGraph"
+			]
+		}
+	]
+}
