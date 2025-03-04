@@ -1,19 +1,18 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 #include "AvoidanceComponent.h"
+
+#include "AlphaDogGame.h"
 #include "GMCPawn.h"
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
 #include "AI/NavigationSystemBase.h"
-#include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 #include "NavigationInvokerComponent.h"
 
 UAvoidanceComponent::UAvoidanceComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-
     NavInvokerComponent = CreateDefaultSubobject<UNavigationInvokerComponent>(TEXT("NavInvoker"));
-   
 }
 
 void UAvoidanceComponent::BeginPlay()
@@ -39,7 +38,7 @@ void UAvoidanceComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (NavSystem && bHasGoal)
+    if (bHasGoal)
     {
         const float DistanceToGoal = FVector::Dist(ActorIns->GetActorLocation(), GoalLocation);
 
@@ -63,11 +62,6 @@ void UAvoidanceComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
             }
         }
     }
-}
-
-void UAvoidanceComponent::UpdateAvoidanceVelocity(const FVector& NewVelocity)
-{
-    AvoidanceVelocity = NewVelocity;
 }
 
 void UAvoidanceComponent::ApplySteering(float DeltaTime)
@@ -118,7 +112,7 @@ void UAvoidanceComponent::UpdatePathPoints()
     }
 }
 
-bool UAvoidanceComponent::ShouldRecalculatePath()
+bool UAvoidanceComponent::ShouldRecalculatePath() const
 {
     // Check if the actor has deviated too far from the current path
     constexpr float DeviationThreshold = 200.0f;
@@ -130,6 +124,7 @@ bool UAvoidanceComponent::ShouldRecalculatePath()
     const FVector TraceEnd = TraceStart + CombinedVelocity.GetSafeNormal() * 500.0f; 
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
+    QueryParams.bReturnPhysicalMaterial = false;
     QueryParams.AddIgnoredActor(ActorIns);
     if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, QueryParams))
     {
@@ -146,15 +141,4 @@ void UAvoidanceComponent::UpdateNavMesh()
         NavSystem->Build();
         FindNewPath(); 
     }
-}
-
-AActor* UAvoidanceComponent::FindFirstActorWithTag(const UWorld* World, const FName Tag)
-{
-    TArray<AActor*> ActorsWithTag;
-    UGameplayStatics::GetAllActorsWithTag(World, Tag, ActorsWithTag);
-    if (ActorsWithTag.Num() > 0)
-    {
-        return ActorsWithTag[0];  // Return the first actor with the tag
-    }
-    return nullptr;
 }

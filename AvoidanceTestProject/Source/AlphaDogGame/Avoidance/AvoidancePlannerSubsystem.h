@@ -6,6 +6,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "AvoidancePlannerSubsystem.generated.h"
 
+class UAvoidanceComponent;
 /**
  * 
  */
@@ -14,42 +15,39 @@ class ALPHADOGGAME_API UAvoidancePlannerSubsystem : public UTickableWorldSubsyst
 {
 	GENERATED_BODY()
 	
-
-public:
+protected:
 	
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	
-	virtual void Tick(float DeltaTime);
+	virtual void Tick(float DeltaTime) override;
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override { return true; }
-	virtual TStatId GetStatId() const { RETURN_QUICK_DECLARE_CYCLE_STAT(UAvoidancePlannerSubsystem, STATGROUP_Tickables); }
+	virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(UAvoidancePlannerSubsystem, STATGROUP_Tickables); }
 
 	// Methods for handling agents and forces
 	void GatherAgents();
 	void InitializeAgents();
 	void ComputeForces(float DeltaTime);
-
-	void SetGoalForAllActors(const FVector& Goal) const;
-
-protected:
-
-	virtual void InitializeInternal();
 	
 private:
 	UPROPERTY()
-	TArray<TObjectPtr<AActor>> Agents;
-	TArray<FVector> Positions;
+	TArray<TObjectPtr<APawn>> Agents;
+	TArray<UAvoidanceComponent*> AvoidanceComponents;
 	TArray<float> Radii;
+	TArray<FVector> Positions;
 	TArray<FVector> Velocities;
 	TArray<FVector> GoalVelocities;
-
+	//Simulation Parameters
 	float SensingRadius = 100.0f;
 	float TimeHorizon = 20.0f;
 	float MaxForce = 20.0f;
 
-	float ComputeTimeToCollision(const int i, const int j);
+	float ComputeTimeToCollision(const int32 i, const int32 j);
 
-	
-	
+	// Precompute squared thresholds.
+	const float SensingRadiusSq = SensingRadius * SensingRadius;
+	const float SeparationDistance = 50.0f;
+	const float SeparationDistanceSq = SeparationDistance * SeparationDistance;
+	const float SeparationForceMag = 200.0f;
+
 };

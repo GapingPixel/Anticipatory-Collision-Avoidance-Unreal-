@@ -26,12 +26,7 @@ public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Components")
-	float Radious = 30;
 	
-	void UpdateAvoidanceVelocity(const FVector& NewVelocity);
-	
-
 	FVector AvoidanceVelocity; // External velocity from the avoidance planner
 	FVector DesiredVelocity; // Desired velocity based on the navigation system
 	FVector CombinedVelocity; // Final combined velocity
@@ -46,6 +41,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal")
 	bool bHasReachGoal = false;
 
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Components")
+	float Radious = 30;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal")
 	FVector GoalLocation;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal")
@@ -55,18 +53,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal")
 	bool bDebug = true;
 	
-private:
+public:
 	UPROPERTY()
 	class UNavigationSystemV1* NavSystem = nullptr;
 	UPROPERTY()
 	UNavigationInvokerComponent* NavInvokerComponent;
 	FTimerHandle NavMeshUpdateTimer;
 	void FindNewPath();
-	bool ShouldRecalculatePath();
+	bool ShouldRecalculatePath() const;
 	void UpdatePathPoints();
 	void UpdateNavMesh();
-	static AActor* FindFirstActorWithTag(const UWorld* World, FName Tag);
-
+	
 	UPROPERTY()
 	TObjectPtr<AGMC_Pawn>ActorIns;
 

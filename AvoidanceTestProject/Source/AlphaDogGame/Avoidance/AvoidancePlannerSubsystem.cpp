@@ -1,23 +1,23 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "AvoidancePlannerSubsystem.h"
-
 #include "AvoidanceComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "EngineUtils.h"
-#include "MyGMC_Pawn.h"
 #include "DrawDebugHelpers.h"
-#include "Character/ADogCharacter.h"
 
 void UAvoidancePlannerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
 
-    FTimerHandle UnusedHandle;
-    GetWorld()->GetTimerManager().SetTimer(
-        UnusedHandle, this, &ThisClass::InitializeInternal, 4.f, false);
-   
+    FTimerHandle Timer;
+    GetWorld()->GetTimerManager().SetTimer(Timer,
+    FTimerDelegate::CreateWeakLambda(this, [this]()
+    {
+        GatherAgents();
+        InitializeAgents();
+    }), 4.f, false);
 }
 
 void UAvoidancePlannerSubsystem::Deinitialize()
@@ -31,98 +31,163 @@ void UAvoidancePlannerSubsystem::Tick(float DeltaTime)
     ComputeForces(DeltaTime);
 }
 
-void UAvoidancePlannerSubsystem::InitializeInternal()
-{
-    GatherAgents();
-    InitializeAgents();
-}
-
 void UAvoidancePlannerSubsystem::GatherAgents()
 {
     Agents.Empty();
-    for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+    AvoidanceComponents.Empty();
+
+    // Iterate over all actors and cache those with an AvoidanceComponent.
+    for (TActorIterator<APawn> It(GetWorld()); It; ++It)
     {
-        AActor* Actor = *It;
-        if (Actor->FindComponentByClass<UAvoidanceComponent>())
+        APawn* Actor = *It;
+        if (UAvoidanceComponent* AvoidComp = Actor->FindComponentByClass<UAvoidanceComponent>())
         {
             Agents.Add(Actor);
+            AvoidanceComponents.Add(AvoidComp);
         }
     }
-    Positions.SetNum(Agents.Num());
-    Radii.SetNum(Agents.Num());
-    Velocities.SetNum(Agents.Num());
-    GoalVelocities.SetNum(Agents.Num());
+    const uint32 NumAgents = Agents.Num();
+    Positions.SetNum(NumAgents);
+    Radii.SetNum(NumAgents);
+    Velocities.SetNum(NumAgents);
+    GoalVelocities.SetNum(NumAgents);
 }
 
 void UAvoidancePlannerSubsystem::InitializeAgents()
 {
-    for (int i = 0; i < Agents.Num(); ++i)
+    const uint32 NumAgents = Agents.Num();
+    for (uint32 i = 0; i <  NumAgents; ++i)
     {
         const AActor* Agent = Agents[i];
         Positions[i] = Agent->GetActorLocation();
-        Radii[i] = Agent->FindComponentByClass<UAvoidanceComponent>()->Radious; 
+        Radii[i] = AvoidanceComponents[i]->Radious;
         Velocities[i] = Agent->GetVelocity();
-        GoalVelocities[i] = Agent->FindComponentByClass<UAvoidanceComponent>()->AvoidanceVelocity;
+        GoalVelocities[i] = AvoidanceComponents[i]->AvoidanceVelocity;
     }
 }
 
 void UAvoidancePlannerSubsystem::ComputeForces(float DeltaTime)
 {
+    const uint32 NumAgents = Agents.Num();
     TArray<FVector> Forces;
-    Forces.SetNum(Agents.Num());
-    for (int i = 0; i < Agents.Num(); ++i)
+    Forces.SetNum(NumAgents);
+    // Refresh positions and initialize forces based on goal velocities.
+    for (uint32 i = 0; i < NumAgents; ++i)
     {
         Positions[i] = Agents[i]->GetActorLocation();
-        Forces[i] = 2 * (GoalVelocities[i] - Velocities[i]);
+        Forces[i] = 2.0f * (GoalVelocities[i] - Velocities[i]);
     }
-    for (int i = 0; i < Agents.Num(); ++i)
+    
+#pragma region Multi-Threaded version
     {
-        for (int j = 0; j < Agents.Num(); ++j)
+        TRACE_CPUPROFILER_EVENT_SCOPE(ComputeForces_Parallel);
+        ParallelFor(NumAgents, [&](const uint32 i)
         {
-            if (i != j && FVector::Dist(Positions[i], Positions[j]) <= SensingRadius)
+            const FVector Pos_I = Positions[i];
+            const FVector Vel_I = Velocities[i];
+            FVector LocalForce = FVector::ZeroVector;
+
+            for (uint32 j = 0; j < NumAgents; ++j)
             {
-                const float t = ComputeTimeToCollision(i, j);
+                if (i == j)
+                    continue;
 
-                if (FVector FAvoid = Positions[i] + Velocities[i] * t - Positions[j] - Velocities[j] * t; FAvoid.SizeSquared() > 0.0f)
+                const FVector Pos_J = Positions[j];
+                const FVector Vel_J = Velocities[j];
+                const float DistSq = FVector::DistSquared(Pos_I, Pos_J);
+
+                // Collision avoidance if within sensing radius.
+                if (DistSq <= SensingRadiusSq)
                 {
-                    FAvoid.Normalize();
-                    float Mag = 0.0f;
-                    if (t >= 0.0f && t <= TimeHorizon)
+                    const float t = ComputeTimeToCollision(i, j);
+                    FVector PredictedPos_I = Pos_I + Vel_I * t;
+                    FVector PredictedPos_J = Pos_J + Vel_J * t;
+                    FVector FAvoid = PredictedPos_I - PredictedPos_J;
+                    if (FAvoid.SizeSquared() > 0.0f)
                     {
-                        Mag = (TimeHorizon - t) / (t + 0.001f);
+                        FAvoid.Normalize();
+                        float Mag = (t >= 0.0f && t <= TimeHorizon) ? (TimeHorizon - t) / (t + 0.001f) : 0.0f;
+                        Mag = FMath::Min(Mag, MaxForce);
+                        FAvoid *= Mag;
+                        LocalForce += FAvoid;
                     }
-
-                    if (Mag > MaxForce)
-                    {
-                        Mag = MaxForce;
-                    }
-                    FAvoid *= Mag;
-                    Forces[i] += FAvoid;
+                }
+                // Separation force when agents are very close.
+                if (DistSq < SeparationDistanceSq)
+                {
+                    FVector SeparationDirection = Pos_I - Pos_J;
+                    SeparationDirection.Normalize();
+                    LocalForce += SeparationDirection * SeparationForceMag;
                 }
             }
-        }
-        for (int j = 0; j < Agents.Num(); ++j)
-        {
-            //if (i != j && FVector::Dist(Positions[i], Positions[j]) < 200.0f) // Separation distance
-            if (i != j && FVector::Dist(Positions[i], Positions[j]) < 50.0f) // Separation distance
-            {
-                FVector SeparationDirection = Positions[i] - Positions[j];
-                SeparationDirection.Normalize();
-                Forces[i] += SeparationDirection * 200.0f; // Separation force magnitude
-            }
-        }
+            // Accumulate the computed force.
+            Forces[i] += LocalForce;
+        }, EParallelForFlags::BackgroundPriority);
     }
-    // Apply forces
-    for (int i = 0; i < Agents.Num(); ++i)
+#pragma endregion
+
+#pragma region Single-thread version:
+/*{ 
+    TRACE_CPUPROFILER_EVENT_SCOPE(ComputeForces_SingleThread);
+        for (uint32 i = 0; i < NumAgents; ++i)
+        {
+            const FVector Pos_I = Positions[i];
+            const FVector Vel_I = Velocities[i];
+            FVector LocalForce = FVector::ZeroVector;
+
+            for (uint32 j = 0; j < NumAgents; ++j)
+            {
+                if (i == j)
+                    continue;
+
+                const FVector Pos_J = Positions[j];
+                const FVector Vel_J = Velocities[j];
+                const float DistSq = FVector::DistSquared(Pos_I, Pos_J);
+
+                // Collision avoidance if within sensing radius.
+                if (DistSq <= SensingRadiusSq)
+                {
+                    const float t = ComputeTimeToCollision(i, j);
+                    FVector PredictedPos_I = Pos_I + Vel_I * t;
+                    FVector PredictedPos_J = Pos_J + Vel_J * t;
+                    FVector FAvoid = PredictedPos_I - PredictedPos_J;
+                    if (FAvoid.SizeSquared() > 0.0f)
+                    {
+                        FAvoid.Normalize();
+                        float Mag = (t >= 0.0f && t <= TimeHorizon) ? (TimeHorizon - t) / (t + 0.001f) : 0.0f;
+                        Mag = FMath::Min(Mag, MaxForce);
+                        FAvoid *= Mag;
+                        LocalForce += FAvoid;
+                    }
+                }
+                // Separation force when agents are very close.
+                if (DistSq < SeparationDistanceSq)
+                {
+                    FVector SeparationDirection = Pos_I - Pos_J;
+                    SeparationDirection.Normalize();
+                    LocalForce += SeparationDirection * SeparationForceMag;
+                }
+            }
+            // Accumulate the computed force.
+            Forces[i] += LocalForce;
+        }
+}*/
+#pragma endregion
+
+    // Update simulation state on the game thread.
+    for (uint32 i = 0; i < NumAgents; ++i)
     {
-        if ( !Agents[i]->FindComponentByClass<UAvoidanceComponent>()->bHasReachGoal)
+        if (!AvoidanceComponents[i]->bHasReachGoal)
         {
             Velocities[i] += Forces[i] * DeltaTime;
-            Agents[i]->FindComponentByClass<UAvoidanceComponent>()->UpdateAvoidanceVelocity(Forces[i]); 
+            AvoidanceComponents[i]->AvoidanceVelocity = Forces[i];
             Positions[i] += Velocities[i] * DeltaTime;
-            Cast<APawn>(Agents[i])->AddMovementInput(Velocities[i].GetSafeNormal(), Velocities[i].Size());
+
+            Agents[i]->AddMovementInput(Velocities[i].GetSafeNormal(), Velocities[i].Size());
+            // Re-sync the position in case the actor’s location was modified.
             Positions[i] = Agents[i]->GetActorLocation();
-            if (Agents[i]->FindComponentByClass<UAvoidanceComponent>()->bDebug)
+
+            if (AvoidanceComponents[i]->bDebug)
             {
                 DrawDebugSphere(GetWorld(), Positions[i], Radii[i], 12, FColor::Red, false, -1.0f, 0, 0.1f);
                 DrawDebugLine(GetWorld(), Positions[i], Positions[i] + Velocities[i], FColor::Green, false, -1.0f, 0, 1.0f);
@@ -130,6 +195,7 @@ void UAvoidancePlannerSubsystem::ComputeForces(float DeltaTime)
         }
     }
 }
+    
 
 float UAvoidancePlannerSubsystem::ComputeTimeToCollision(const int i, const int j)
 {
@@ -148,21 +214,10 @@ float UAvoidancePlannerSubsystem::ComputeTimeToCollision(const int i, const int 
     if (Discr <= 0.0f) { return FLT_MAX; }
 
     const float Tau = (b - FMath::Sqrt(Discr)) / a;
-
-    if (Tau < 0.0f)
-    {
-        return FLT_MAX;
-    }
-    return Tau;
+    return (Tau < 0.0f) ? FLT_MAX : Tau;
 }
 
-void UAvoidancePlannerSubsystem::SetGoalForAllActors(const FVector& Goal) const
-{
-    for (const AActor* Actor : Agents)
-    {
-        Actor->FindComponentByClass<UAvoidanceComponent>()->GoalLocation = Goal;
-    }
-}
+
 
 
 
