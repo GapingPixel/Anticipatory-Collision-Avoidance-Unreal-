@@ -86,42 +86,59 @@ void UAvoidancePlannerSubsystem::ComputeForces(float DeltaTime)
             const FVector Pos_I = Positions[i];
             const FVector Vel_I = Velocities[i];
             FVector LocalForce = FVector::ZeroVector;
-
-            for (uint32 j = 0; j < NumAgents; ++j)
+                constexpr uint32 BatchSize = 4; //Process agents in batches.  Adjust based on SIMD width (4 for SSE, 8 for AVX)
+            for (uint32 j = 0; j < NumAgents; j += BatchSize)
             {
-                if (i == j)
-                    continue;
-
-                const FVector Pos_J = Positions[j];
-                const FVector Vel_J = Velocities[j];
-                const float DistSq = FVector::DistSquared(Pos_I, Pos_J);
-
-                // Collision avoidance if within sensing radius.
-                if (DistSq <= SensingRadiusSq)
+                const uint32 BatchEnd = FMath::Min(j + BatchSize, NumAgents);
+                float DistSqBatch[BatchSize]; // SIMD-like arrays for batch processing
+                FVector PosBatch[BatchSize];
+                FVector VelBatch[BatchSize];
+                FVector FAvoidBatch[BatchSize];
+                float MagBatch[BatchSize];
+                for (uint32 k = j; k < BatchEnd; ++k) // Load batch data
                 {
-                    const float t = ComputeTimeToCollision(i, j);
-                    FVector PredictedPos_I = Pos_I + Vel_I * t;
-                    FVector PredictedPos_J = Pos_J + Vel_J * t;
-                    FVector FAvoid = PredictedPos_I - PredictedPos_J;
-                    if (FAvoid.SizeSquared() > 0.0f)
+                    const uint32 Idx = k - j;
+                    if (k == i) { // Skip self-interaction
+                        DistSqBatch[Idx] = FLT_MAX; // Invalid distance
+                        continue;
+                    }
+                    PosBatch[Idx] = Positions[k];
+                    VelBatch[Idx] = Velocities[k];
+                    DistSqBatch[Idx] = FVector::DistSquared(Pos_I, PosBatch[Idx]);
+                }
+                for (uint32 k = j; k < BatchEnd; ++k)// Process collision avoidance in batch
+                {
+                    const uint32 Idx = k - j;
+                    if (DistSqBatch[Idx] <= SensingRadiusSq)
                     {
-                        FAvoid.Normalize();
-                        float Mag = (t >= 0.0f && t <= TimeHorizon) ? (TimeHorizon - t) / (t + 0.001f) : 0.0f;
-                        Mag = FMath::Min(Mag, MaxForce);
-                        FAvoid *= Mag;
-                        LocalForce += FAvoid;
+                        const float t = ComputeTimeToCollision(i, k); // Scalar for now
+                        FVector PredictedPos_I = Pos_I + Vel_I * t;
+                        FVector PredictedPos_J = PosBatch[Idx] + VelBatch[Idx] * t;
+                        FAvoidBatch[Idx] = PredictedPos_I - PredictedPos_J;
+                        const float SizeSq = FAvoidBatch[Idx].SizeSquared();
+                        if (SizeSq > 0.0f) {
+                            FAvoidBatch[Idx] /= FMath::Sqrt(SizeSq); // Normalize
+                            MagBatch[Idx] = (t >= 0.0f && t <= TimeHorizon) ? (TimeHorizon - t) / (t + 0.001f) : 0.0f;
+                            MagBatch[Idx] = FMath::Min(MagBatch[Idx], MaxForce);
+                            FAvoidBatch[Idx] *= MagBatch[Idx];
+                        }
+                        else {
+                            FAvoidBatch[Idx] = FVector::ZeroVector;
+                        }
+                    }
+                    else {
+                        FAvoidBatch[Idx] = FVector::ZeroVector;
+                    }
+                    if (DistSqBatch[Idx] < SeparationDistanceSq) { // Separation force
+                        FVector SeparationDirection = Pos_I - PosBatch[Idx];
+                        SeparationDirection.Normalize();
+                        LocalForce += SeparationDirection * SeparationForceMag;
                     }
                 }
-                // Separation force when agents are very close.
-                if (DistSq < SeparationDistanceSq)
-                {
-                    FVector SeparationDirection = Pos_I - Pos_J;
-                    SeparationDirection.Normalize();
-                    LocalForce += SeparationDirection * SeparationForceMag;
+                for (uint32 k = j; k < BatchEnd; ++k) {  // Accumulate avoidance forces from batch
+                    LocalForce += FAvoidBatch[k - j];
                 }
-            }
-            // Accumulate the computed force.
-            Forces[i] += LocalForce;
+            }Forces[i] += LocalForce;// Accumulate the computed force
         }, EParallelForFlags::BackgroundPriority);
     }
 #pragma endregion
